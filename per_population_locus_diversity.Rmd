@@ -1,0 +1,153 @@
+---
+title: "per_population_locus_diversity"
+author: "Matt Bootsma"
+date: "10/1/2020"
+output: html_document
+---
+# Dependencies
+```{r}
+#basic stats needed this installed to run
+install.packages('E:/Grad/1908_Great_Lakes_WAE/migrate_due_to_update/HWxtest-master.zip')
+```
+
+```{r}
+library(beepr)
+library(tidyverse)
+library(diveRsity)
+'%!in%' <- function(x,y)!('%in%'(x,y))
+# this function will produce boxplots of the diversity stats across all loci across all populations in a genepop that has been processed by diveRsity::basicStats
+# the three required arguments are:
+# 1)  bstats_raw: this is the basic output from basicStats, e.g.,
+#   bstats_check = basicStats("./GL_mm0.7.maf.indv50.mm0.5.indv90.R2.mac4.W.recode.gen")
+#   I usually save large objects like this as an .rda so they can be re-used as needed without re-running the long calculation
+#   save(file = "./1908_locus_diversity_by_pop.rda",bstats_check)
+# 2) pop_IDs: this is an optional whitelist that will transform the coded population ID into a string with the real name for legible plot lables
+#   TODO: right now the names have digits stripped from them so the coded name isn't what you'd find in the raw output or genepop 
+#   e.g., E_SH_19-09392 would be processed to _E_SH_ which is the value you need to have as the lookup in the whitelist
+#   the indexing will also require correct column ID names as it's indexing off of those. Once I reuse this function I will integrate a generalized fix
+#   For now you can omit the whitelist and the code ID will appear as a group label which isn't the end of the world
+# 3) A whitelist of the target loci (CHROM_POS) you wish to look at the distribution for
+#   right now this is mandatory, as I'm just using this to look at the distribution of targeted subsets that would be candidates for GTseq panels
+#   may generalize to allow no locus whitelist (i.e., plot all loci) but not high priority as this tool is more geared to GTseq panels right now.
+divPlot_byPop = function(bstats_raw, pop_IDs, target_loci){
+  
+  for (d in c(1,3,4,6)) {
+    #d is the index of the diversity stat to extract from rownames(bstats_check$main_tab$...)
+    #each pop has it's own data frame listed in bstats_check$main_tab
+    # for each table (i) in 1:n_tables (n populations)
+    # loop through and extract a specific diversity stat from population specific tables and bind them into one table that will have all populations per locus estimates of that stat
+    for (i in 1:n_distinct(names(bstats_raw$main_tab))) {
+      
+      #initialize the summary table
+      if (i == 1) {
+        # isolate population i
+        long_Bstats_popI = as.data.frame(t(bstats_raw$main_tab[[i]]))
+        # append POP ID to diversity stats
+        colnames(long_Bstats_popI)[d] = paste(colnames(long_Bstats_popI)[d],"_",names(bstats_raw$main_tab[i]),sep = "")
+        colnames(long_Bstats_popI)[d] = gsub("`","",colnames(long_Bstats_popI)[d])
+        colnames(long_Bstats_popI)[d] = gsub("\\d+","",colnames(long_Bstats_popI)[d])
+        colnames(long_Bstats_popI)[d] = gsub("-","",colnames(long_Bstats_popI)[d])
+        # make the SNP ID a value that we can easily match with dplyr:left_join
+        long_Bstats_popI$ID = rownames(long_Bstats_popI)
+        # Appending the pop specific data to the main diversity table, currently only using HE, not bringing FIS
+        long_Bstats_popI_2 = as.data.frame(long_Bstats_popI[,c(10,d)])
+        # initialize the output dataframe
+        selection_datI = long_Bstats_popI_2
+      }
+      
+      if (i > 1) {
+        # isolate population i
+        long_Bstats_popI = as.data.frame(t(bstats_raw$main_tab[[i]]))
+        # append POP ID to diversity stats
+        n = colnames(long_Bstats_popI)[d]
+        colnames(long_Bstats_popI)[d] = paste(colnames(long_Bstats_popI)[d],"_",names(bstats_raw$main_tab[i]),sep = "")
+        colnames(long_Bstats_popI)[d] = gsub("`","",colnames(long_Bstats_popI)[d])
+        colnames(long_Bstats_popI)[d] = gsub("\\d+","",colnames(long_Bstats_popI)[d])
+        colnames(long_Bstats_popI)[d] = gsub("-","",colnames(long_Bstats_popI)[d])
+        # make the SNP ID a value that we can easily match with dplyr:left_join
+        long_Bstats_popI$ID = rownames(long_Bstats_popI)
+        # Appending the pop specific data to the main diversity table, currently only using HE, not bringing FIS
+        long_Bstats_popI_2 = as.data.frame(long_Bstats_popI[,c(10,d)])
+        # Join the data using the SNP ID values, left join calling the base data table as the left
+        selection_datI = left_join(selection_datI,long_Bstats_popI_2,"ID")
+      }
+    }
+    
+    # Filter to only those that make it to the actual selection step
+    selection_datI_primed = selection_datI[which(selection_datI$ID %in% target_loci),]
+    # make into a long dataframe that is easier for plotting by pop
+    selection_datI_primed = gather(selection_datI_primed,pop_ID,diversity_stat_d,2:ncol(selection_datI_primed))
+    selection_datI_primed$pop_ID = gsub(n,"",selection_datI_primed$pop_ID)
+    
+    # read in whitelist of the Site ID for each site code and replace
+    ##
+    ##
+    ##
+    # whitelist_names = read.csv(paste(pop_IDs))
+    # return(whitelist_names)
+    # Conditional plotting based on if a list of IDs is or isn't supplied
+    if (!missing(pop_IDs)) {
+      for (i in unique(selection_datI_primed$pop_ID)) {      
+        selection_datI_primed[which(selection_datI_primed$pop_ID == i),"pop_ID_long"] = pop_IDs[which(pop_IDs$pop_ID_R == i),"pop_ID"]
+      }
+      
+      #plot the diversity stats by pop
+      p_diversity = ggplot(data = selection_datI_primed, aes(x = pop_ID_long, y = selection_datI_primed[[3]]))+
+        ylab(rownames(bstats_raw$main_tab[[1]])[d])+
+        geom_boxplot()+
+        theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+    
+      print(p_diversity)
+      
+    } else {
+      
+      #plot the diversity stats by pop
+      p_diversity = ggplot(data = selection_datI_primed, aes(x = pop_ID, y = selection_datI_primed[[3]]))+
+        ylab(rownames(bstats_raw$main_tab[[1]])[d])+
+        geom_boxplot()+
+        theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+    
+      print(p_diversity)
+    }
+
+
+  }
+}
+```
+
+# Plot stats
+
+This is the designed 600 primer pairs
+```{r}
+# bstats_check = basicStats("./GL_mm0.7.maf.indv50.mm0.5.indv90.R2.mac4.W.recode.gen")
+# save(file = "./1908_locus_diversity_by_pop.rda",bstats_check)
+load("./1908_locus_diversity_by_pop.rda")
+
+pop_ID_whitelist = read.csv("./whitelist_pop_names.csv")
+
+primed_loci = read.csv("./1908_whitelist_target_600_loci.csv")
+primed_loci = paste(primed_loci$Sequence_Name,"_",primed_loci$POS_vcf, sep = "")
+
+divPlot_byPop(bstats_raw = bstats_check, pop_IDs = pop_ID_whitelist, target_loci = primed_loci)
+```
+
+
+This is the test method (99.1)
+```{r}
+# bstats_check = basicStats("./GL_mm0.7.maf.indv50.mm0.5.indv90.R2.mac4.W.recode.gen")
+# save(file = "./1908_locus_diversity_by_pop.rda",bstats_check)
+# load("./1908_locus_diversity_by_pop.rda")
+
+pop_ID_whitelist = read.csv("./whitelist_pop_names.csv")
+
+# these are the CHROM IDs selected from the rubias simulation
+# I need to get the corresponding POS and call the SNPs using CHROM_POS formatting
+loci_for_panel
+selection_dat = read.csv("./Great_Lakes_WAE_mhap_Diversity.csv")
+selection_dat_panel = selection_dat[which(selection_dat$CHROM %in% loci_for_panel),]
+selection_dat_panel$target_SNP = paste(selection_dat_panel$CHROM,"_",selection_dat_panel$POS, sep = "")
+SNPs_for_panel = selection_dat_panel$target_SNP
+
+divPlot_byPop(bstats_raw = bstats_check, pop_IDs = pop_ID_whitelist, target_loci = SNPs_for_panel)
+```
+
